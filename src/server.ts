@@ -1,15 +1,65 @@
-import express, { Express, Request, Response } from 'express';
-import dotenv from 'dotenv';
+import 'dotenv/config';
+import express from 'express';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
+import chessHandlers from './logic/chess';
+import { preloadGameData } from './logic/preload';
 
-dotenv.config();
+let playersConnected = 0;
 
-const app: Express = express();
-const port = process.env.API_PORT;
+export const getPlayersConnected = () => playersConnected;
 
-app.get('/', (req: Request, res: Response) => {
-  res.send('Express + TypeScript Server');
+const port = process.env.PORT || 3800;
+const app = express();
+
+app.use(express.json());
+app.use((_, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header(
+    'Access-Control-Allow-Methods',
+    'GET, POST, OPTIONS, PUT, PATCH, DELETE'
+  );
+  res.header(
+    'Access-Control-Allow-Headers',
+    'Origin, X-Requested-With, Content-Type, Accept'
+  );
+  next();
 });
 
-app.listen(port, () => {
-  console.log(`⚡️[server]: Server is running at https://localhost:${port}`);
+const server = createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: '*',
+  },
 });
+
+preloadGameData();
+
+const { getGameData, handleMovement, resetChessGame } = chessHandlers;
+
+app.get('/game-data', async (_, res) => {
+  res.json(await getGameData());
+});
+
+app.post('/move', async (req, res) => {
+  const { data, status } = await handleMovement(req.body, io);
+
+  res.status(status).json(data);
+});
+
+app.post('/reset', async (req, res) => {
+  const data = await resetChessGame(req.body?.leosSecret, io);
+
+  if (data !== undefined) res.status(data.status).json(data.data);
+  else res.json({ message: 'Game reseted' });
+});
+
+io.on('connection', (socket) => {
+  playersConnected++;
+
+  socket.on('disconnect', () => {
+    playersConnected--;
+  });
+});
+
+server.listen(port, () => console.log(`Listening on port ${port}`));
